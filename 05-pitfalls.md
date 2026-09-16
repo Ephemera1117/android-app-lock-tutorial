@@ -18,6 +18,8 @@
 | 10 | **onPause 里翻 visibility 在某些设备来不及** | coverView 翻成 VISIBLE 了但卡片上还是原画面 | 系统拍快照的时机可能早于 onPause 回调完成 | 加 onWindowFocusChanged(false)，比 onPause 更早触发 |
 | 11 | **DataStore 在 onCreate 时还没就绪** | 冷启动时读设置拿到的是默认值 | DataStore 的第一次 emit 需要时间 | 状态机默认锁屏（fail-safe），等设置到位补算 |
 | 12 | **onWindowFocusChanged 被 Dialog 触发** | 弹出系统权限对话框也触发了 coverView | onWindowFocusChanged(false) 在弹 Dialog 时也会调用 | coverNeeded() 会检查锁是否开着，没开锁不盖；如果需要更精确，可以检查 isFinishing |
+| 13 | **回来时直接揭 coverView 会闪一帧内容** | 超时锁屏回来时先看到聊天内容再弹锁屏 | coverView (GONE) 和 Compose LockScreen 渲染之间有一帧空档 | 锁屏要显示时不揭 coverView，让 Compose LockScreen 的 SideEffect 回调来揭（见 04 实践补充） |
+| 14 | **lockEnabled 关着时 coverView 永远不揭** | 锁屏功能关掉后切后台再回来，保护页一直挡着 | shouldShowLockScreen 初始值 true（冷启动安全默认），lockEnabled=false 时 LockScreen 不渲染、signalLockScreenDrawn 不会被调 | hideLeaveCoverSafely 同时检查 lockEnabled 和 lockPinHash，不只看 shouldShowLockScreen |
 
 ## 设计原则总结
 

@@ -201,3 +201,46 @@ FLAG_SECURE 和 coverView 不能同时生效——FLAG_SECURE 会让系统在 Su
 - **FLAG_SECURE**：可选增强，卡片变黑但阻止一切截屏
 
 你可以根据自己的需求选择。
+
+---
+
+### 实践补充：回来时揭 coverView 的时序问题
+
+在实际使用中我们发现了两个必须处理的边缘情况：
+
+#### 问题 1：锁屏需要显示时，coverView 揭早了会闪一帧
+
+`onStart` 里先 `ensureResolvedForForeground()` 再 `hideLeaveCover()`，逻辑上没问题——`shouldShowLockScreen` 已经同步算好了，Compose 第一帧会渲染 LockScreen。但 coverView 是原生 View（Z 序在 Compose 之上），GONE 的瞬间 Compose 的 LockScreen 还没画到 SurfaceFlinger，可能闪一帧底下的旧内容。
+
+**我们的做法**：如果 `shouldShowLockScreen == true` 且 `lockEnabled == true` 且 PIN 已设，就不揭 coverView——等 Compose LockScreen 渲染后，通过 `SideEffect { signalLockScreenDrawn() }` 回调 Activity 来揭。这样 coverView 和 LockScreen 之间的间隙最小化。
+
+```kotlin
+private fun hideLeaveCoverSafely() {
+    val security = settingsStore.settingsFlow.value.securitySetting
+    val lockWillShow = security.lockEnabled &&
+        security.lockPinHash.isNotEmpty() &&
+        appLockManager.shouldShowLockScreen.value
+    if (lockWillShow) return  // 等 LockScreen SideEffect 来揭
+    hideLeaveCover()
+}
+
+fun signalLockScreenDrawn() { hideLeaveCover() }
+```
+
+Compose 端：
+```kotlin
+if (shouldShowLockScreen && settings.securitySetting.lockEnabled) {
+    SideEffect { signalLockScreenDrawn() }
+    LockScreen(...)
+}
+```
+
+**坦率说这仍然不完美**——`SideEffect` 在组合提交时同步运行，但那一帧的像素可能还没到屏幕上。这是 Android 渲染管线的固有限制，我们目前没有找到百分百消除闪现的方法。但这个做法把概率降到了很低。
+
+#### 问题 2：lockEnabled 关着时 coverView 永远不揭
+
+`shouldShowLockScreen` 的初始值是 `true`（冷启动安全默认，见 02 章）。如果设置还没加载好，或者锁屏功能是关着的，`shouldShowLockScreen` 可能一直是 `true`。
+
+此时 `hideLeaveCoverSafely()` 判断 `shouldShowLockScreen == true` → 不揭，等 LockScreen 来揭。但 Compose 那边因为 `lockEnabled == false`，不会渲染 LockScreen，`signalLockScreenDrawn()` 永远不会被调——coverView 永远挡着。
+
+**修法**：`hideLeaveCoverSafely` 必须同时检查 `lockEnabled` 和 `lockPinHash`，不能只看 `shouldShowLockScreen`。上面的代码已经包含了这个检查。
