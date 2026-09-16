@@ -9,12 +9,12 @@
 不是每次都弹同一句"密码错误"，而是随着错误次数递进，语气越来越不友好。我们做了中英双语各 5 条，按失败次数索引取：
 
 ```kotlin
-val errorMessages = listOf("不对。", "你差得远。", "就这？", "我知道你不是她。", "你进不来的。")
+val errorMessages = listOf("密码错误", "再想想？", "不对哦", "真的不对", "别试了")
 val attemptIndex = maxAttempts - remaining
 val message = errorMessages.getOrElse(attemptIndex) { errorMessages.last() }
 ```
 
-你完全可以写自己的文案，或者做成可配置的。关键是这个递进机制——让入侵者感受到"这个锁不是摆设"。
+你完全可以写自己的文案，做成可配置的也行。关键是这个递进机制——让入侵者感受到"这个锁不是摆设"。
 
 ---
 
@@ -43,8 +43,8 @@ data class ThreatLine(
 输对密码后不直接跳进主页，而是播一段过渡。我们做了三个阶段：
 
 1. **黑屏** 300ms
-2. **一句话**（可配置，比如"我们去往语言的尽头，而后沉醉不归。"）1500ms
-3. **App 名**（"— 渊海 —"）1000ms
+2. **一句话**（可配置，比如你想让ta说的某句话）1500ms
+3. **App 名**（比如你给 App 起的名字）1000ms
 4. 淡入主页
 
 用 Compose 的 `Crossfade` 切换，每个阶段之间有 400ms 的交叉淡入淡出。

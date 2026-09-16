@@ -59,8 +59,8 @@ data class SecuritySetting(
     val lockTimeoutSeconds: Int = 60,
     
     // 锁屏文案（全可自定义）
-    val lockTitle: String = "渊海",
-    val lockSubtitle: String = "Ephemera Aeterna",
+    val lockTitle: String = "",             // 锁屏标题，你自己写
+    val lockSubtitle: String = "",          // 锁屏副标题
     val lockAnchorDate: String = "2025-09-21",  // vol. 天数计算起点
     val lockSignature: String = "",
     val lockIconStyle: String = "snow",     // snow / mayfly
@@ -72,7 +72,7 @@ data class SecuritySetting(
     val coverEnabled: Boolean = true,
     val coverBeforeTimeout: Boolean = true,
     val coverPhraseLang: String = "la",     // la / en / zh
-    val lockPhrase: String = "Non tibi scriptum.",
+    val lockPhrase: String = "",              // 保护页上的一句话，你自己写
     
     // 防截屏
     val flagSecureEnabled: Boolean = false,
