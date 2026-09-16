@@ -12,33 +12,26 @@
 
 ### 锁屏
 
-打开 App 时不是一个冷冰冰的"请输入密码"，而是这样的画面：
-
-- 上半是你自定义的图标、标题、卷号（每天自动 +1，像杂志一样），还有一行签名
-- 下半是 6 位数字键盘，满 6 位自动验证，不用按确认
-- 输错密码会有递进的消息（从"不对。"到"我知道你不是她。"），用完次数后进入锁定，屏幕逐字打出威胁文案
-- 输对之后有一段过渡动画（黑屏 → 一句话 → App 名 → 淡入主页），而不是直接跳进去
+- 打开 App 先过一道 PIN 锁，验证通过才能进
+- 锁屏的视觉风格由你自己设计（我们的实现里做成了杂志封面风格，你可以做成任何样子）
+- 输错密码有递进反馈，错够次数后冷却锁定
+- 验证通过后有过渡动画，不是直接跳进主页
 
 ### 切后台保护
 
-切到最近任务时，别人看到的不是你们的聊天内容，而是你设计的一张品牌页面——和锁屏同款的图标、标题、卷号，加上一句铭文（语种可选 Latin / English / 中文）。
-
-效果对比：
+切到最近任务时，别人看到的不是你们的聊天内容，而是一张你自己设计的保护页。
 
 | 没有保护 | FLAG_SECURE（常见方案） | 我们的方案 |
 |---------|----------------------|-----------|
-| 聊天内容完整暴露 | 黑屏，安全但很丑 | **自定义品牌页，安全且好看** |
+| 聊天内容完整暴露 | 黑屏，安全但很丑 | **自定义保护页，安全且好看** |
 
-### 设置项
-
-用户可以控制的东西：
+### 可配置
 
 - 锁屏开关、PIN 码、超时时间
 - 熄屏行为三档（关 / 按超时 / 立即锁）
 - 切后台保护开关、超时前是否也保护
-- 铭文语种（拉丁 / 英文 / 中文）
 - 防截屏录屏（FLAG_SECURE，可选）
-- 所有锁屏文案（标题、签名、过渡语、错误消息）
+- 锁屏和保护页的视觉内容
 
 ---
 
@@ -46,7 +39,7 @@
 
 如果你的手机上住着一个对你很重要的人，你一定不希望别人拿起你的手机就能看到你们之间说了什么。
 
-Android 的"最近任务"界面会把每个 App 的画面缩略图挂在那里。对聊天 App 来说，这意味着你跟他说的每一句话，别人划一下就能看到。锁屏密码挡得住正面进入，挡不住任务切换器里的那一瞥。
+Android 的"最近任务"界面会把每个 App 的画面缩略图挂在那里。对聊天 App 来说，你跟他说的每一句话，别人划一下就能看到。锁屏密码挡得住正面进入，挡不住任务切换器里的那一瞥。
 
 这篇教程讲的就是怎么把这个口子堵上——不光是加一把锁，而是从"别人拿起手机能看到什么"出发，做一整套保护。
 
@@ -58,38 +51,37 @@ Android 的"最近任务"界面会把每个 App 的画面缩略图挂在那里�
 
 ## 通用性和局限
 
-### 这是通用思路吗
-
-**架构和思路是通用的**，但代码是 Kotlin + Jetpack Compose 写的，绑在 Android 上。
-
-具体来说：
+### 哪些是通用的
 
 | 部分 | 通用程度 | 说明 |
 |------|---------|------|
 | 锁屏状态机 | ⭐⭐⭐ 高 | 前后台检测 + 超时判定 + 熄屏策略，逻辑适用于任何 Android App |
-| PIN 锁屏 UI | ⭐⭐ 中 | Compose 实现，换 XML/Flutter/React Native 要重写界面但逻辑一样 |
-| 切后台 coverView 方案 | ⭐⭐⭐ 高 | **这是本文最有价值的部分**。`window.addContentView` + 三重触发的思路适用于任何 Android App，不限 UI 框架 |
-| ProtectionCover 位图渲染 | ⭐⭐ 中 | 用 Canvas 画的，跟 Compose 无关，可以直接搬 |
+| 切后台 coverView 方案 | ⭐⭐⭐ 高 | **本文最有价值的部分**。`window.addContentView` + 三重触发的思路适用于任何 Android App，不限 UI 框架 |
+| PIN 锁屏 UI | ⭐⭐ 中 | 我们用 Compose 实现，换 XML / Flutter / React Native 要重写界面但逻辑一样 |
+| 保护页位图渲染 | ⭐⭐ 中 | 用 Android Canvas 画的，跟 Compose 无关，可以直接搬 |
 
 ### 做不到的事
 
-1. **iOS 做不了**。iOS 没有等价的 `addContentView` 机制，系统快照的控制方式完全不同。iOS 可以用 `applicationWillResignActive` + 遮罩 view，但系统行为和 Android 差异很大，本文不覆盖。
+- **只有 Android**。iOS 的系统快照机制完全不同，本文不覆盖。
+- **不是所有 Android 设备都保证有效**。coverView 方案在荣耀 Android 16 上验证通过，但不排除某些 ROM 拍快照的时机更早。遇到这种情况可以回退到 `setRecentsScreenshotEnabled(false)`（卡片变黑但安全）。
+- **FLAG_SECURE 和 coverView 不能同时生效**。只能二选一：要自定义保护页就不开 FLAG_SECURE，要绝对防截屏就接受黑屏。
+- **不防 root / ADB 调试**。攻击者有 root 权限可以直接读数据文件、清除 PIN。这不是应用层能解决的。
+- **只在单 Activity 架构下测试过**。多 Activity 需要每个 Activity 都挂 coverView。
 
-2. **不是所有 Android 设备都保证有效**。coverView 方案依赖系统在 `onWindowFocusChanged` 之后拍快照——我们在荣耀 Android 16 上验证通过，但不排除某些 ROM 拍快照的时机更早。如果遇到这种情况，可以回退到 `setRecentsScreenshotEnabled(false)`（卡片变黑但安全）。
+### 可以改进的方向
 
-3. **FLAG_SECURE 和 coverView 不能同时生效**。FLAG_SECURE 在 SurfaceFlinger 层面拦截截图，连 coverView 都拍不到。只能二选一：要品牌页就不开 FLAG_SECURE，要绝对防截屏就接受黑屏。
+我们的实现是为自己的场景量身做的，有些地方你可以根据需要改：
 
-4. **PIN 存储用的是 SHA-256 明文哈希**。对于本地应用锁来说够用（攻击者拿到哈希还要先 root 手机），但不适合用于网络认证场景。如果需要更高安全性，可以换 bcrypt/scrypt + Android Keystore。
-
-5. **不防 root / ADB 调试**。如果攻击者有 root 权限或连着 ADB，可以直接读 DataStore 文件、清除 PIN、或者 dump 内存。这不是应用层能解决的问题。
-
-6. **只在单 Activity 架构下测试过**。多 Activity 的场景下，每个 Activity 的 `onPause`/`onWindowFocusChanged` 行为可能不同，coverView 需要挂在每个 Activity 上。
+- **不一定是 6 位数字 PIN**。可以改成 4 位、改成图案锁、改成生物识别（指纹/面容），状态机逻辑不用动，只换验证方式
+- **保护页内容完全自由**。我们画的是图标 + 标题 + 铭文，你可以换成任何你想要的画面——纯色、logo、一张图片、一句话，只要能渲染成 Bitmap 就行
+- **PIN 存储可以更安全**。我们用的是 SHA-256，本地够用但不算最佳实践。可以换 bcrypt/scrypt，或者用 Android Keystore 做硬件级保护
+- **锁定策略可以更灵活**。比如连接家里 WiFi 时不上锁、特定蓝牙设备在附近时不上锁，这些可以作为 `computeLockState` 的额外判定条件加进去
+- **多 Activity 支持**。把 coverView 逻辑抽成一个 `BaseActivity` 或用 `Application.ActivityLifecycleCallbacks` 统一处理
 
 ### 依赖的 Android 版本
 
-- `setRecentsScreenshotEnabled`：API 33+（Android 13）。低版本没有这个 API，只能用 FLAG_SECURE 或纯 coverView
-- 精确闹钟相关权限：API 31+（Android 12）
-- 本文的保护页位图渲染用了 `windowManager.currentWindowMetrics`：API 30+（Android 11），低版本有 fallback
+- `setRecentsScreenshotEnabled`：API 33+（Android 13）。低版本只能用 FLAG_SECURE 或纯 coverView
+- `windowManager.currentWindowMetrics`：API 30+（Android 11），低版本有 fallback
 
 ---
 
@@ -107,7 +99,7 @@ Rikkahub 是一个开源的 Android LLM 聊天前端，支持 OpenAI / Claude / 
 |------|---------|
 | [01-architecture.md](01-architecture.md) | 整体架构：三层设计怎么配合 |
 | [02-lock-state-machine.md](02-lock-state-machine.md) | 锁屏状态机：什么时候该上锁 |
-| [03-lock-screen-ui.md](03-lock-screen-ui.md) | 锁屏界面：PIN、错误递进、威胁文案、解锁动画 |
+| [03-lock-screen-ui.md](03-lock-screen-ui.md) | 锁屏界面：PIN、错误反馈、解锁动画 |
 | [04-recents-protection.md](04-recents-protection.md) | **切后台隐私保护**：怎么让任务卡片显示你的画面而非黑屏 |
 | [05-pitfalls.md](05-pitfalls.md) | 踩坑总结：12 条血泪教训 |
 
