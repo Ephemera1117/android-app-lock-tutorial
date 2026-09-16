@@ -114,9 +114,10 @@ Rikkahub 是一个开源的 Android LLM 聊天前端，支持 OpenAI / Claude / 
 |------|---------|
 | [01-architecture.md](01-architecture.md) | 整体架构：三层设计怎么配合 |
 | [02-lock-state-machine.md](02-lock-state-machine.md) | 锁屏状态机：什么时候该上锁 |
-| [03-lock-screen-ui.md](03-lock-screen-ui.md) | 锁屏界面：PIN、错误反馈、解锁动画 |
+| [03-lock-screen-ui.md](03-lock-screen-ui.md) | 锁屏界面：PIN 验证、错误锁定（必要部分） |
 | [04-recents-protection.md](04-recents-protection.md) | **切后台隐私保护**：怎么让任务卡片显示你画的东西而非黑屏 |
 | [05-pitfalls.md](05-pitfalls.md) | 踩坑总结：12 条血泪教训 |
+| [06-extensions.md](06-extensions.md) | 可以拓展什么：递进消息、威胁打字机、解锁动画、输入动效 |
 
 ---
 
