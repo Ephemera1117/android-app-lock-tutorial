@@ -10,7 +10,7 @@
 | 2 | **Compose 帧时钟在 onPause 后停止** | 在 onPause 里改 Compose 状态想显示遮罩，但画面不变 | Activity paused 后 Compose 的 frame clock 停了，状态改了也不会触发重组 | 用真 View（ImageView），不用 Compose |
 | 3 | **WindowManager.addView 创建的是独立窗口** | 用 WindowManager 挂的遮罩窗口不出现在任务快照里 | 任务快照只采集主窗口缓冲区，独立窗口不在范围内 | 用 window.addContentView（加到 DecorView 里） |
 | 4 | **用 Flow 传递锁屏状态会晚一帧** | 回到 App 时先闪一帧主页，然后才上锁屏 | Flow 需要一次协程调度，晚于第一帧绘制 | 用 mutableStateOf，同步读取 |
-| 5 | **ensureResolvedForForeground 不幂等会误判熄屏** | 「熄屏不算离开」档的用户，熄屏回来被要求输密码 | onStart 和 onResume 都调了 ensureResolved，第二次调用时 screenWasOff 标记已被消费，走进超时判定 | 加 foregroundResolved 标记，算过就不再算 |
+| 5 | **ensureResolvedForForeground 不幂等会误判熄屏** | 设了「熄屏不算离开」，但熄屏回来还是被要求输密码 | onStart 和 onResume 都调了 ensureResolved，第二次调用时 screenWasOff 标记已被消费，走进超时判定 | 加 foregroundResolved 标记，算过就不再算 |
 | 6 | **「立即锁」不清 unlockedThisProcess** | 锁屏挂着的时候切到别的 App 再切回来，锁屏自己打开了 | 熄屏「立即锁」只设了 shouldShowLockScreen=true 但没清 unlockedThisProcess，回来时超时判定以为"已验证过" | 立即锁时同时清 unlockedThisProcess = false |
 | 7 | **冷启动后短暂离开绕过锁屏** | 进程被杀后重启，切走再切回来（没超时），不上锁 | 新进程的 unlockedThisProcess 默认 false，但如果不检查这个就直接走超时判定，短暂离开会被放行 | computeLockState 里显式检查 unlockedThisProcess |
 | 8 | **锁屏已显示时被重新计算抹掉** | 某些时序下锁屏自己消失 | 回前台重算 computeLockState 时，如果没超时就 return false，把已显示的锁屏抹掉了 | 加规则：_shouldShowLockScreen.value == true 时一律 return true |
