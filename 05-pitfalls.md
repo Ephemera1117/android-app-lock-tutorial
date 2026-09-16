@@ -29,4 +29,4 @@
 
 4. **实机测试**：模拟器的任务切换器行为和真机不一样，各品牌 ROM 也不一样。至少在一台真机上测过。
 
-5. **两个功能不要互相干扰**：setRecentsScreenshotEnabled 和 coverView 各自都能工作，但一起开就互相打架。安全功能的组合要单独测试。
+5. **两样东西不要互相干扰**：setRecentsScreenshotEnabled 和 coverView 各自都能工作，但一起开就互相打架。安全相关的东西组合起来要单独测。
