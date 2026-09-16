@@ -212,7 +212,7 @@ FLAG_SECURE 和 coverView 不能同时生效——FLAG_SECURE 会让系统在 Su
 
 `onStart` 里先 `ensureResolvedForForeground()` 再 `hideLeaveCover()`，逻辑上没问题——`shouldShowLockScreen` 已经同步算好了，Compose 第一帧会渲染 LockScreen。但 coverView 是原生 View（Z 序在 Compose 之上），GONE 的瞬间 Compose 的 LockScreen 还没画到 SurfaceFlinger，可能闪一帧底下的旧内容。
 
-**我们的做法**：如果 `shouldShowLockScreen == true` 且 `lockEnabled == true` 且 PIN 已设，就不揭 coverView——等 Compose LockScreen 渲染后，通过 `SideEffect { signalLockScreenDrawn() }` 回调 Activity 来揭。这样 coverView 和 LockScreen 之间的间隙最小化。
+**我们的做法**：如果 `shouldShowLockScreen == true` 且 `lockEnabled == true` 且 PIN 已设，就不揭 coverView——等窗口获得焦点后再揭。`onWindowFocusChanged(hasFocus = true)` 是最可靠的时机：此时窗口内容已经在屏幕上，Compose LockScreen 一定已经渲染完毕。
 
 ```kotlin
 private fun hideLeaveCoverSafely() {
@@ -220,22 +220,28 @@ private fun hideLeaveCoverSafely() {
     val lockWillShow = security.lockEnabled &&
         security.lockPinHash.isNotEmpty() &&
         appLockManager.shouldShowLockScreen.value
-    if (lockWillShow) return  // 等 LockScreen SideEffect 来揭
+    if (lockWillShow) return  // 等 onWindowFocusChanged(true) 来揭
     hideLeaveCover()
+}
+
+override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (!hasFocus) {
+        showLeaveCover()
+    } else {
+        // 窗口获得焦点 = 内容已经在屏幕上了。
+        // 如果锁屏正在显示，这时候揭 coverView 最安全——
+        // Compose LockScreen 已经渲染完毕，不会闪底下的内容。
+        if (appLockManager.shouldShowLockScreen.value) {
+            hideLeaveCover()
+        }
+    }
 }
 
 fun signalLockScreenDrawn() { hideLeaveCover() }
 ```
 
-Compose 端：
-```kotlin
-if (shouldShowLockScreen && settings.securitySetting.lockEnabled) {
-    SideEffect { signalLockScreenDrawn() }
-    LockScreen(...)
-}
-```
-
-**坦率说这仍然不完美**——`SideEffect` 在组合提交时同步运行，但那一帧的像素可能还没到屏幕上。这是 Android 渲染管线的固有限制，我们目前没有找到百分百消除闪现的方法。但这个做法把概率降到了很低。
+~~之前尝试过用 Compose 的 `SideEffect { signalLockScreenDrawn() }` 在 LockScreen 组合时揭，但这有个致命问题：如果 LockScreen 在离开前就已经在显示（比如上次超时后没解锁就熄屏），回来时 Compose 没有新的组合发生，SideEffect 不会重新执行，coverView 就永远挡着。~~ `onWindowFocusChanged(true)` 不依赖 Compose 的组合时机，每次回前台都会触发，彻底解决了这个问题。
 
 #### 问题 2：lockEnabled 关着时 coverView 永远不揭
 
