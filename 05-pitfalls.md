@@ -21,6 +21,9 @@
 | 13 | **回来时直接揭 coverView 会闪一帧内容** | 超时锁屏回来时先看到聊天内容再弹锁屏 | coverView (GONE) 和 Compose LockScreen 渲染之间有一帧空档 | 锁屏要显示时不揭 coverView，在 `onWindowFocusChanged(true)` 时揭（此时 LockScreen 已渲染完毕）。之前试过 Compose `SideEffect` 但不可靠——LockScreen 如果离开前就在显示，回来时没有新组合，SideEffect 不执行 |
 | 14 | **lockEnabled 关着时 coverView 永远不揭** | 锁屏功能关掉后切后台再回来，保护页一直挡着 | shouldShowLockScreen 初始值 true（冷启动安全默认），lockEnabled=false 时 LockScreen 不渲染、signalLockScreenDrawn 不会被调 | hideLeaveCoverSafely 同时检查 lockEnabled 和 lockPinHash，不只看 shouldShowLockScreen |
 | 15 | **SideEffect 不会在回前台时重新执行** | 用 Compose SideEffect 揭 coverView，第一次有效，之后回来就卡在保护页 | SideEffect 只在新组合时执行；如果 LockScreen 离开前就在显示，回来时状态没变、没有新组合 | 改用 onWindowFocusChanged(true) 揭 coverView，不依赖 Compose 组合时机 |
+| 16 | **Activity 不是 FragmentActivity → 指纹点了没反应** | 点锁屏上的图标，**什么都不发生**：不弹框、不报错、不崩溃 | `BiometricPrompt` 的构造函数只接受 `FragmentActivity`。`ComponentActivity` 不是它的子类，`context as? FragmentActivity` 静默返回 null，于是整段逻辑被跳过 | 把 Activity 基类改成 `FragmentActivity`（它是 `ComponentActivity` 的子类，其他用法不受影响）。排查靠把中间结果落文件，**不要等日志**——这台设备上 `Log.d` 根本读不到 |
+| 17 | **PromptInfo.build() 抛 `Negative text must be set and non-empty`** | 点图标直接崩溃 | 库里两条互斥校验：验证方式**不含**「设备密码」时负按钮文字必填；**含**时反过来绝不能填。只调 `setAllowedAuthenticators(BIOMETRIC_WEAK)` 而不给负按钮文字就命中第一条 | 不含设备密码 → 加 `setNegativeButtonText("取消")`；含设备密码（`DEVICE_CREDENTIAL`）→ 绝不能加 |
+| 18 | **给序列化的设置加字段是安全的，改类型不是** | 老用户升级后设置回默认值，或者整个设置读不出来 | 设置整体是一个 JSON 存在 DataStore 里，字段类型一变老 JSON 解析失败 | **只加新字段**并给安全默认值；要改语义就加新字段 + 用哨兵值（比如 `-1`）表示"没设过"，读的时候换算。老字段留着不动 |
 
 ## 设计原则总结
 
@@ -33,3 +36,5 @@
 4. **实机测试**：模拟器的任务切换器行为和真机不一样，各品牌 ROM 也不一样。至少在一台真机上测过。
 
 5. **两样东西不要互相干扰**：setRecentsScreenshotEnabled 和 coverView 各自都能工作，但一起开就互相打架。安全相关的东西组合起来要单独测。
+
+6. **系统不让你做的事，别硬做**：指纹界面不能自绘、FLAG_SECURE 下拍不到自己的保护页、某些 ROM 不认 TaskDescription——这些都是系统层面的限制，绕过它们花的时间远多于收益。**先去确认"这件事到底能不能做"**，再决定怎么实现。判断不了就翻系统/库的源码或文档，别靠试。
