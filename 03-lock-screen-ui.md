@@ -240,25 +240,21 @@ override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
 理由是"免得有人拿手指一直蹭"——但这是**自己给自己加更严的限制，一点收益都没有**：
 系统本来就还在放行，你只是更早把选择权收走了。所以后来改成同样 5 次。
 
-对齐到 5 还有个好处：**可以写 5 条递进文案**，跟密码错误那套一个节奏。
-
 ```kotlin
 private const val BIOMETRIC_MAX_ATTEMPTS = 5
 
 override fun onAuthenticationFailed() {
     biometricFailCount++
-    val index = (biometricFailCount - 1).coerceIn(0, BIOMETRIC_MAX_ATTEMPTS - 1)
-    errorMessage = messages[index]
     if (biometricFailCount >= BIOMETRIC_MAX_ATTEMPTS) biometricDisabled = true
     showError = true
 }
 ```
 
-文案用跟密码错误**不同的措辞**——密码错是"你输错了"，指纹错大多只是手指按歪/手湿，
-所以开头是让他再按一次，**连续失败几次之后**才逐渐变成"这不是她"。
-最后一条同时承担"指纹到此为止，改用密码"的通知作用，可以多停留一会儿。
-
 `biometricFailCount` 和 `biometricDisabled` 用 `remember` 存——**锁屏重新组合时会自动归零，也就是下次进锁屏又能用指纹了**，这正是我们要的行为。
+
+> 每次失败弹什么话是**花活儿**，不是必须做对的，所以放在 [06-extensions.md](06-extensions.md) 的
+> 「错误消息递进」里讲（跟密码那套是同一个机制）。这里只说一句要注意的：
+> 指纹那套的**开头一条应该是中性的**，因为大多数情况只是手指没按好。
 
 ### 加个开关
 
