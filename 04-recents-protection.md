@@ -246,8 +246,9 @@ private fun hideLeaveCoverSafely() {
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
-        // ⚠️ 加 activityResumed 判断，否则弹框也会误触发（见「问题 3」）
-        if (!activityResumed) showLeaveCover()
+        // ⚠️ 无条件贴。别加"是不是真离开"的判断——实测焦点丢失比 onUserLeaveHint 早约 579ms，
+        //    而系统拍快照就在失焦这一下，加了判断会变成真离开时漏盖（见「问题 3」）
+        showLeaveCover()
     } else {
         // 窗口获得焦点 = 内容已经在屏幕上了。
         // 如果锁屏正在显示，这时候揭 coverView 最安全——
