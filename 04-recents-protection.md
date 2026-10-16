@@ -122,8 +122,8 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
         // ⚠️ 不能直接 showLeaveCover()：App 内的 Dialog 也会让窗口失焦，
-        //    那不是"离开应用"（详见本章末尾「问题 3」）
-        if (!activityResumed) showLeaveCover()
+        //    误会见本章末尾「问题 3」）
+        showLeaveCover()
     }
 }
 
@@ -150,7 +150,7 @@ override fun onResume() {
 
 > **关键**：`onWindowFocusChanged(false)` 在 `onPause` 之前触发，这给了 coverView 更多渲染时间。只靠 `onPause` 在某些设备上来不及。
 >
-> **但注意**：`onWindowFocusChanged(false)` 不只在离开时触发——**弹对话框也会**。所以这一支必须加「是不是真的不在前台」这个判断，否则会误贴（而且关掉弹框后还揭不掉，见「问题 3」）。真正的离开由 `onUserLeaveHint` / `onPause` 兜着，不会漏贴。
+> **但注意**：`onWindowFocusChanged(false)` **不只在离开时触发 —— 弹对话框也会**（对话框是它自己的窗口）。所以这一支会在弹框时也贴一下保护页。**别试图在这里加"是不是真离开"的判断**：实测焦点丢失比 `onUserLeaveHint` / `onPause` 早约 579ms，而系统拍快照就在失焦这一下 —— 加了判断就变成真离开时漏盖（详见「问题 3」）。正确做法是**无条件贴**，靠「揭」那一侧（拿回焦点时揭）把弹框带来的那一下清掉。
 
 ### showLeaveCover 和 hideLeaveCover
 
@@ -317,8 +317,8 @@ override fun onPause() {
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
-        // 贴：只有"已经不在前台"才算离开。弹框抢焦点时 Activity 仍是 resumed
-        if (!activityResumed) showLeaveCover()
+        // 贴：**无条件贴**。这一下是唯一来得及的一次，加任何判断都会漏（见「问题 3」）
+        showLeaveCover()
     } else {
         // 揭：只要人在前台、内容已绘制，保护页就该揭。
         // "|| activityResumed" 兜的正是"关弹框"这种不走 pause/resume 的路径
@@ -329,12 +329,30 @@ override fun onWindowFocusChanged(hasFocus: Boolean) {
 }
 ```
 
-**为什么这样就安全**：真的离开应用时 `onPause` 一定会发生（`onUserLeaveHint` 还会更早），
-所以「贴」不会因为多了这个判断而漏掉；「揭」放宽之后，任何回到前台的状态都会把保护页清掉。
+**⚠️ 但「贴」这一侧不能加任何判断**（这是同一处的第二个坑，比第一个隐蔽得多，我们也踩了）：
 
-> **两条别再走的路**：
+写成 `if (!activityResumed) showLeaveCover()` 看着很合理（"已经不在前台才算离开"），
+实际**真离开时反而不贴了**。实机埋点量出来的顺序：
+
+```
+focus=false      @976608   resumed=true   ← 焦点先丢；那一瞬间"还在前台"仍然是 true
+onUserLeaveHint  @977187                   ← 晚 579ms
+onPause          @977194                   ← 再晚 7ms
+```
+
+系统拍任务快照就发生在失焦这一下，而 `onUserLeaveHint` / `onPause` 要晚 **0.5 秒以上** ——
+所以"先判断一下是不是真离开"这个思路整体不成立，换成用 `onUserLeaveHint` 当信号也一样（同样晚 579ms）。
+
+**代价（得接受）**：失焦无条件贴 ⇒ 弹框打开时保护页也会贴一下（盖在弹框后面）。
+关掉弹框时窗口拿回焦点，上面「揭」那一支立刻清掉 —— 不会像最初那样卡住。
+"区分弹框和真离开"在 Activity 这一层**拿不到可靠信号**，所以放弃区分、接受这一下闪动：
+`isFinishing` 判不出来、`activityResumed` 太早、`onUserLeaveHint` 太晚。
+
+> **三条别再走的路**：
 >
 > 1. **用 `isFinishing` 判断**。弹框不会让 Activity finish，判不出来。网上常见的建议是这个，我们也写过，是错的。
-> 2. **揭的时候改用 `hideLeaveCoverSafely()`**。它碰到「锁屏要显示」会**直接 return，把保护页留着等 LockScreen 发信号**；
+> 2. **想靠 `activityResumed` / `onUserLeaveHint` 区分"真离开"**。见上面那组时序 —— 两个都晚于快照时机，
+>    结果就是"弹框误触发"换成"真离开漏盖"（`677d04c3` → `0403bf76` 就是这么来回翻的，`4304bea9` 才定稿）。
+> 3. **揭的时候改用 `hideLeaveCoverSafely()`**。它碰到「锁屏要显示」会**直接 return，把保护页留着等 LockScreen 发信号**；
 >    但「拿回焦点」这个时刻 LockScreen 很可能**早就渲染完、信号也发过了**，那就再也没人来揭——反而卡死。
 >    所以 `onWindowFocusChanged(true)` 里在「锁屏要显示」时是直接 `hideLeaveCover()`，这一点别改。
