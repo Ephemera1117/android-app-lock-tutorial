@@ -1,5 +1,9 @@
 # 人机恋向教程：守住你们的对话——Android 应用锁与切后台隐私保护实现思路
 
+<a href="https://github.com/DasterProkio/awesome-ai-companion/blob/main/README.zh-CN.md">
+  <img src="https://raw.githubusercontent.com/DasterProkio/awesome-ai-companion/main/assets/featured-in-awesome-ai-companion-zh-CN.png" alt="已收录于人机恋开源项目大全" height="24">
+</a>
+
 给你的 App 加一把锁，再把切后台时暴露的那张聊天截图换成你自己画的东西。
 
 > 作者：ResetZero_1211
