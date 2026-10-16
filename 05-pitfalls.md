@@ -24,6 +24,7 @@
 | 16 | **Activity 不是 FragmentActivity → 指纹点了没反应** | 点锁屏上的图标，**什么都不发生**：不弹框、不报错、不崩溃 | `BiometricPrompt` 的构造函数只接受 `FragmentActivity`。`ComponentActivity` 不是它的子类，`context as? FragmentActivity` 静默返回 null，于是整段逻辑被跳过 | 把 Activity 基类改成 `FragmentActivity`（它是 `ComponentActivity` 的子类，其他用法不受影响）。排查靠把中间结果落文件，**不要等日志**——这台设备上 `Log.d` 根本读不到 |
 | 17 | **PromptInfo.build() 抛 `Negative text must be set and non-empty`** | 点图标直接崩溃 | 库里两条互斥校验：验证方式**不含**「设备密码」时负按钮文字必填；**含**时反过来绝不能填。只调 `setAllowedAuthenticators(BIOMETRIC_WEAK)` 而不给负按钮文字就命中第一条 | 不含设备密码 → 加 `setNegativeButtonText("取消")`；含设备密码（`DEVICE_CREDENTIAL`）→ 绝不能加 |
 | 18 | **给序列化的设置加字段是安全的，改类型不是** | 老用户升级后设置回默认值，或者整个设置读不出来 | 设置整体是一个 JSON 存在 DataStore 里，字段类型一变老 JSON 解析失败 | **只加新字段**并给安全默认值；要改语义就加新字段 + 用哨兵值（比如 `-1`）表示"没设过"，读的时候换算。老字段留着不动 |
+| 19 | **开了 FLAG_SECURE 之后卡片变成系统给的空白，看着像保护页失效** | 打开「防截屏录屏」后，最近任务里那张卡片**不是自己画的保护页，而是系统给的空白（黑/白）**，很容易以为是保护页样式变了、或者代码没生效；同时 App 内的截图、录屏全部失败 | FLAG_SECURE 是系统级拦截：系统压根不读窗口内容，所以 coverView 画得再好也拍不到，卡片只能是系统默认的空白。两个开关同时开时 FLAG_SECURE 赢，保护页那一套整个不起作用 | 二选一：要卡片显示自制保护页 → 关掉 FLAG_SECURE；要彻底不给看（卡片空白 + 禁止截图）→ 开 FLAG_SECURE，并把 coverView 那套当成不需要。排查顺序：**先读设置里的 `flagSecureEnabled`，再去看 coverView 的时序** —— 这两套机制外观很像、成因完全不同，别一上来就查保护页 |
 
 ## 设计原则总结
 
