@@ -150,7 +150,8 @@ Rikkahub 是一个开源的 Android LLM 聊天前端，支持 OpenAI / Claude / 
 
 ## 更新日志
 
-改动都记在 [CHANGELOG.md](CHANGELOG.md)。最近一次是 **2026-09-19**：加了指纹解锁（3.1 节）和它踩的两个坑。
+改动都记在 [CHANGELOG.md](CHANGELOG.md)。最近一次是 **2026-10-17**：修了「弹框误触发保护页、
+关掉弹框还揭不掉」的 bug，并把踩坑 #12 原来是错的解法改对了。
 
 ---
 

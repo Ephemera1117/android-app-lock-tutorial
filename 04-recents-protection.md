@@ -38,9 +38,9 @@
 
 ### 设置项
 
-- **切后台保护页**（总开关）：关了就不盖，卡片显示真实界面
-- **超时前也保护**：开着 = 只要切出去就盖；关了 = 应用锁触发前不盖
-- **铭文语种**：Latin / English / 中文
+- **后台保护页**（总开关）：关了就不盖，卡片显示真实界面
+- **立即遮挡**：开着（始终遮挡）= 只要切出去就盖；关了（仅锁定时遮挡）= 应用锁触发前不盖、超时之后才盖
+- **后台铭文**：Latin / English / 中文
 
 ---
 
@@ -120,7 +120,11 @@ private fun ProtectionCoverSync(securitySetting: SecuritySetting) {
 // 1. 最早：窗口失去焦点（比 onPause 早）
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
-    if (!hasFocus) showLeaveCover()
+    if (!hasFocus) {
+        // ⚠️ 不能直接 showLeaveCover()：App 内的 Dialog 也会让窗口失焦，
+        //    那不是"离开应用"（详见本章末尾「问题 3」）
+        if (!activityResumed) showLeaveCover()
+    }
 }
 
 // 2. 用户主动离开（按 Home/多任务键）
@@ -131,12 +135,22 @@ override fun onUserLeaveHint() {
 
 // 3. 兜底
 override fun onPause() {
+    activityResumed = false
     super.onPause()
     showLeaveCover()
+}
+
+// 配合上面：onResume 里把标记置回来
+override fun onResume() {
+    activityResumed = true
+    super.onResume()
+    // ...
 }
 ```
 
 > **关键**：`onWindowFocusChanged(false)` 在 `onPause` 之前触发，这给了 coverView 更多渲染时间。只靠 `onPause` 在某些设备上来不及。
+>
+> **但注意**：`onWindowFocusChanged(false)` 不只在离开时触发——**弹对话框也会**。所以这一支必须加「是不是真的不在前台」这个判断，否则会误贴（而且关掉弹框后还揭不掉，见「问题 3」）。真正的离开由 `onUserLeaveHint` / `onPause` 兜着，不会漏贴。
 
 ### showLeaveCover 和 hideLeaveCover
 
@@ -204,9 +218,9 @@ FLAG_SECURE 和 coverView 不能同时生效——FLAG_SECURE 会让系统在 Su
 
 ---
 
-### 实践补充：回来时揭 coverView 的时序问题
+### 实践补充：贴 / 揭 coverView 的三个时序坑
 
-在实际使用中我们发现了两个必须处理的边缘情况：
+在实际使用中我们发现了三个必须处理的边缘情况：
 
 #### 问题 1：锁屏需要显示时，coverView 揭早了会闪一帧
 
@@ -227,12 +241,14 @@ private fun hideLeaveCoverSafely() {
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
-        showLeaveCover()
+        // ⚠️ 加 activityResumed 判断，否则弹框也会误触发（见「问题 3」）
+        if (!activityResumed) showLeaveCover()
     } else {
         // 窗口获得焦点 = 内容已经在屏幕上了。
         // 如果锁屏正在显示，这时候揭 coverView 最安全——
         // Compose LockScreen 已经渲染完毕，不会闪底下的内容。
-        if (appLockManager.shouldShowLockScreen.value) {
+        // 「仍在前台」这一条兜的是"关弹框"那种不走 pause/resume 的情况（见「问题 3」）。
+        if (appLockManager.shouldShowLockScreen.value || activityResumed) {
             hideLeaveCover()
         }
     }
@@ -250,3 +266,70 @@ fun signalLockScreenDrawn() { hideLeaveCover() }
 此时 `hideLeaveCoverSafely()` 判断 `shouldShowLockScreen == true` → 不揭，等 LockScreen 来揭。但 Compose 那边因为 `lockEnabled == false`，不会渲染 LockScreen，`signalLockScreenDrawn()` 永远不会被调——coverView 永远挡着。
 
 **修法**：`hideLeaveCoverSafely` 必须同时检查 `lockEnabled` 和 `lockPinHash`，不能只看 `shouldShowLockScreen`。上面的代码已经包含了这个检查。
+
+#### 问题 3：弹框会误触发保护页，而且关掉弹框后揭不掉
+
+这是实机上被用户报回来的一个 bug，值得单独说 —— 它是**「贴」和「揭」两侧同时出错**。
+
+**现象**：把「立即遮挡」设成「始终遮挡」之后，在设置里随便点开一个弹框，点「完成 / 确定」，
+**整张保护页就盖在屏幕上了**，只能切后台再回来才恢复。
+
+**为什么会贴上**
+
+- Android 里**对话框是它自己的一个窗口**。弹框一打开，它会把 Activity 窗口的焦点抢走，
+  于是 Activity 的 `onWindowFocusChanged(false)` 被调用。
+- 而这一支最早是**无条件** `showLeaveCover()` —— 它本来是给「离开应用」用的，
+  结果「弹框抢焦点」也被当成了离开。
+- **为什么平时看不见**：`coverNeeded()` 在「仅锁定时遮挡」那档还会多问一句「应用锁是不是真的要显示」，
+  编辑的时候不是，所以不贴。**只有「始终遮挡」这档是无条件为真的** —— 这个 bug 只在开着
+  「始终遮挡」时出现，很容易漏测。
+
+**为什么关掉弹框也揭不掉**
+
+- 关弹框走的是「窗口重新获得焦点」，这条路**完全不经过 `onPause` / `onStart` / `onResume`** ——
+  也就是 `onStart` / `onResume` 里那条 `hideLeaveCoverSafely()` 根本不会跑。
+- 而 `onWindowFocusChanged(true)` 里原来的条件只在「锁屏要显示」时才揭。锁屏没要显示 → 没人揭。
+- 两边都不管，保护页就留在屏幕上。切后台再回来能恢复，是因为那条路会走 `onResume`。
+
+**修法**：在 Activity 里维护一个「本 Activity 是不是在前台」的标记，两侧都用它。
+
+```kotlin
+private var activityResumed = false
+
+override fun onResume() {
+    activityResumed = true
+    super.onResume()
+    appLockManager.ensureResolvedForForeground()
+    hideLeaveCoverSafely()
+}
+
+override fun onPause() {
+    activityResumed = false
+    super.onPause()
+    showLeaveCover()
+}
+
+override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (!hasFocus) {
+        // 贴：只有"已经不在前台"才算离开。弹框抢焦点时 Activity 仍是 resumed
+        if (!activityResumed) showLeaveCover()
+    } else {
+        // 揭：只要人在前台、内容已绘制，保护页就该揭。
+        // "|| activityResumed" 兜的正是"关弹框"这种不走 pause/resume 的路径
+        if (appLockManager.shouldShowLockScreen.value || activityResumed) {
+            hideLeaveCover()
+        }
+    }
+}
+```
+
+**为什么这样就安全**：真的离开应用时 `onPause` 一定会发生（`onUserLeaveHint` 还会更早），
+所以「贴」不会因为多了这个判断而漏掉；「揭」放宽之后，任何回到前台的状态都会把保护页清掉。
+
+> **两条别再走的路**：
+>
+> 1. **用 `isFinishing` 判断**。弹框不会让 Activity finish，判不出来。网上常见的建议是这个，我们也写过，是错的。
+> 2. **揭的时候改用 `hideLeaveCoverSafely()`**。它碰到「锁屏要显示」会**直接 return，把保护页留着等 LockScreen 发信号**；
+>    但「拿回焦点」这个时刻 LockScreen 很可能**早就渲染完、信号也发过了**，那就再也没人来揭——反而卡死。
+>    所以 `onWindowFocusChanged(true)` 里在「锁屏要显示」时是直接 `hideLeaveCover()`，这一点别改。
