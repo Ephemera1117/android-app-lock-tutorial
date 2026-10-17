@@ -121,8 +121,10 @@ private fun ProtectionCoverSync(securitySetting: SecuritySetting) {
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
-        // ⚠️ 不能直接 showLeaveCover()：App 内的 Dialog 也会让窗口失焦，
-        //    误会见本章末尾「问题 3」）
+        // 弹框 / Sheet 也会让 Activity 失焦。它们都是本进程里新加的窗口 ——
+        // 失焦这一刻 mViews 里会多出一个 DecorView（别用 hasWindowFocus() 判断，
+        // 那一刻两个窗口都还没拿到焦点）。详见本章末尾「问题 3」。
+        if (hasOtherWindowInProcess()) return
         showLeaveCover()
     }
 }
@@ -150,7 +152,11 @@ override fun onResume() {
 
 > **关键**：`onWindowFocusChanged(false)` 在 `onPause` 之前触发，这给了 coverView 更多渲染时间。只靠 `onPause` 在某些设备上来不及。
 >
-> **但注意**：`onWindowFocusChanged(false)` **不只在离开时触发 —— 弹对话框也会**（对话框是它自己的窗口）。所以这一支会在弹框时也贴一下保护页。**别试图在这里加"是不是真离开"的判断**：实测焦点丢失比 `onUserLeaveHint` / `onPause` 早约 579ms，而系统拍快照就在失焦这一下 —— 加了判断就变成真离开时漏盖（详见「问题 3」）。正确做法是**无条件贴**，靠「揭」那一侧（拿回焦点时揭）把弹框带来的那一下清掉。
+> **但注意**：`onWindowFocusChanged(false)` **不只在离开时触发 —— 弹对话框也会**（对话框是它自己的窗口）。
+> 贴罩本身不能加"先判断是不是真离开"的条件：实测焦点丢失比 `onUserLeaveHint` / `onPause` 早约 579ms，
+> 而系统拍快照就在失焦这一下，加了判断就变成真离开时漏盖。
+> 能加的判断只有一种——**"本进程里是不是多出了一个窗口"**（自家弹窗/Sheet 的特征）。这个判断是在
+> 失焦那一瞬间同步做的，不会推迟贴罩，见「问题 3」。
 
 ### showLeaveCover 和 hideLeaveCover
 
@@ -273,87 +279,137 @@ fun signalLockScreenDrawn() { hideLeaveCover() }
 
 **修法**：`hideLeaveCoverSafely` 必须同时检查 `lockEnabled` 和 `lockPinHash`，不能只看 `shouldShowLockScreen`。上面的代码已经包含了这个检查。
 
-#### 问题 3：弹框会误触发保护页，而且关掉弹框后揭不掉
+#### 问题 3：弹框 / Sheet 会误触发保护页
 
-这是实机上被用户报回来的一个 bug，值得单独说 —— 它是**「贴」和「揭」两侧同时出错**。
+这是实机上被用户报回来的一个 bug，前后修了三轮才彻底解决。它的难点全在
+**「失焦那一瞬间，怎么知道人是不是真的离开了」**。
 
-**现象**：把「立即遮挡」设成「始终遮挡」之后，在设置里随便点开一个弹框，点「完成 / 确定」，
-**整张保护页就盖在屏幕上了**，只能切后台再回来才恢复。
+**现象**
+
+- 「立即遮挡」设成「始终遮挡」之后，点开任意弹框（设置里的编辑框、消息右下角的 ⋮ 菜单、
+  ModalBottomSheet），保护页会从半透明弹窗后面露出来。
+- 早期版本更糟：点「完成」关掉弹框后保护页不走，整张盖在屏幕上，只能切后台再回来。
+
+**为什么平时看不见**：`coverNeeded()` 在「仅锁定时遮挡」那一档还会多问一句「应用锁是不是真的要显示」，
+编辑的时候不是，所以不贴。**只有「始终遮挡」这档是无条件为真的** —— 这个 bug 只在开着
+「始终遮挡」时出现，很容易漏测。
 
 **为什么会贴上**
 
-- Android 里**对话框是它自己的一个窗口**。弹框一打开，它会把 Activity 窗口的焦点抢走，
+- Android 里**对话框/Sheet/Popup 都是它自己的一个窗口**。弹框一打开，它会把 Activity 窗口的焦点抢走，
   于是 Activity 的 `onWindowFocusChanged(false)` 被调用。
-- 而这一支最早是**无条件** `showLeaveCover()` —— 它本来是给「离开应用」用的，
-  结果「弹框抢焦点」也被当成了离开。
-- **为什么平时看不见**：`coverNeeded()` 在「仅锁定时遮挡」那档还会多问一句「应用锁是不是真的要显示」，
-  编辑的时候不是，所以不贴。**只有「始终遮挡」这档是无条件为真的** —— 这个 bug 只在开着
-  「始终遮挡」时出现，很容易漏测。
+- 而这一支原本是给「离开应用」用的 —— 结果「弹框抢焦点」也被当成了离开。
 
-**为什么关掉弹框也揭不掉**
+**为什么关掉弹框也揭不掉（早期版本）**
 
 - 关弹框走的是「窗口重新获得焦点」，这条路**完全不经过 `onPause` / `onStart` / `onResume`** ——
   也就是 `onStart` / `onResume` 里那条 `hideLeaveCoverSafely()` 根本不会跑。
 - 而 `onWindowFocusChanged(true)` 里原来的条件只在「锁屏要显示」时才揭。锁屏没要显示 → 没人揭。
 - 两边都不管，保护页就留在屏幕上。切后台再回来能恢复，是因为那条路会走 `onResume`。
+- **修法（保留）**：`onWindowFocusChanged(true)` 这一侧放宽条件、该揭就揭，不要只等锁屏状态。
 
-**修法**：在 Activity 里维护一个「本 Activity 是不是在前台」的标记，两侧都用它。
+**真正的难点：失焦那一瞬间判不出是不是离开**
+
+前 10-17 的三轮尝试都在找「真离开」的信号，全部失败：
+
+| 信号 | 为什么不行 |
+|---|---|
+| `isFinishing` | 弹框不会让 Activity finish，判不出来 |
+| `activityResumed` | 按 Home 那一瞬间它仍然是 `true`（`onPause` 晚 586ms） |
+| `onUserLeaveHint` | 晚 579ms，系统拍快照早就完成了 |
+
+**2026-10-18 又排除一条：不能看「哪个窗口拿着焦点」**。实测失焦那一刻，
+Activity 窗口和弹窗的 `hasWindowFocus()` **两个都是 `false`** —— 焦点正在两个窗口之间交接，
+还没落到弹窗上。日志长这样（`n=2` 表示本进程有两个窗口）：
+
+```
+focus=false resumed=true ownWindow=false n=2
+[DecorView:f=false:decor=true DecorView:f=false:decor=false]
+```
+
+**可靠判据：本进程里是不是多了一个窗口**
+
+弹窗必须在抢走焦点之前就已经被创建，所以失焦那一刻它一定已经在窗口列表里：
+
+| 场景 | `WindowManagerGlobal.mViews` |
+|---|---|
+| 真离开（按 Home / 切到别的 App） | 只有 Activity 自己一个（`n=1`） |
+| 自家弹框 / Sheet / Popup | 多出一个 DecorView（`n=2`） |
+
+这个判断是**同步**做的，不会把贴罩推迟到快照之后 —— 和 `activityResumed` /
+`onUserLeaveHint` 那类"晚 0.5 秒"的信号有本质区别。
 
 ```kotlin
-private var activityResumed = false
-
-override fun onResume() {
-    activityResumed = true
-    super.onResume()
-    appLockManager.ensureResolvedForForeground()
-    hideLeaveCoverSafely()
-}
-
-override fun onPause() {
-    activityResumed = false
-    super.onPause()
-    showLeaveCover()
+/**
+ * 本进程里是不是还有 Activity 之外的其他窗口（弹框 / Sheet / Popup）。
+ * 不可用时返回 false，退回旧行为（贴一下再揭）。
+ */
+private fun hasOtherWindowInProcess(): Boolean {
+    val views: List<*>? = try {
+        val cls = Class.forName("android.view.WindowManagerGlobal")
+        val instance = cls.getMethod("getInstance").invoke(null)
+        var list: List<*>? = try {
+            val f = cls.getDeclaredField("mViews")
+            f.isAccessible = true
+            f.get(instance) as? List<*>
+        } catch (_: Throwable) { null }
+        if (list == null) list = try {
+            cls.getMethod("getRootViews").invoke(instance) as? List<*>
+        } catch (_: Throwable) { null }
+        if (list == null) list = try {
+            cls.getMethod("getRootViews", android.os.IBinder::class.java)
+                .invoke(instance, null) as? List<*>
+        } catch (_: Throwable) { null }
+        list
+    } catch (_: Throwable) {
+        null
+    }
+    if (views == null) return false
+    val decor = window.decorView
+    return views.any { it is View && it !== decor && it.windowVisibility == View.VISIBLE }
 }
 
 override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     if (!hasFocus) {
-        // 贴：**无条件贴**。这一下是唯一来得及的一次，加任何判断都会漏（见「问题 3」）
-        showLeaveCover()
-    } else {
-        // 揭：只要人在前台、内容已绘制，保护页就该揭。
-        // "|| activityResumed" 兜的正是"关弹框"这种不走 pause/resume 的路径
-        if (appLockManager.shouldShowLockScreen.value || activityResumed) {
+        // 自家弹框 / Sheet 抢焦点：一个像素都不盖
+        if (hasOtherWindowInProcess()) {
             hideLeaveCover()
+            return
         }
+        // 真离开：失焦就贴，这是唯一来得及的一次
+        showLeaveCover()
+        // 兜底：窗口列表万一晚一帧更新，再各查一次（都必须确认多出窗口才揭）
+        window.decorView.post {
+            if (activityResumed && hasOtherWindowInProcess()) hideLeaveCover()
+        }
+        handler.postDelayed({
+            if (activityResumed && hasOtherWindowInProcess()) hideLeaveCover()
+        }, 700L)
+    } else {
+        // 窗口拿回焦点 = 内容已经在屏幕上，保护页揭掉。
+        // 这里别改回 hideLeaveCoverSafely()（见下面第 4 条）
+        hideLeaveCover()
     }
 }
 ```
 
-**⚠️ 但「贴」这一侧不能加任何判断**（这是同一处的第二个坑，比第一个隐蔽得多，我们也踩了）：
+**要接受的两个边界**
 
-写成 `if (!activityResumed) showLeaveCover()` 看着很合理（"已经不在前台才算离开"），
-实际**真离开时反而不贴了**。实机埋点量出来的顺序：
+1. **反射是隐藏 API**。`WindowManagerGlobal` 不在公开 SDK 里。我们在 Android 16（Honor）
+   实测可用；某些 ROM 或未来版本可能拦掉 —— 那时 `hasOtherWindowInProcess()` 返回 `false`，
+   行为退回旧版（弹框时闪一下再揭），**保护不会丢**。所以一定要用 `try/catch` 包住，
+   绝不能因为反射失败让 App 崩。
+2. **弹框开着的时候按 Home**：Activity 窗口早就失焦了，不会再收到一次焦点事件，
+   这种离开只能靠 `onUserLeaveHint` / `onPause` 补贴（比理想晚）。这是拿不到更早信号时的极限。
 
-```
-focus=false      @976608   resumed=true   ← 焦点先丢；那一瞬间"还在前台"仍然是 true
-onUserLeaveHint  @977187                   ← 晚 579ms
-onPause          @977194                   ← 再晚 7ms
-```
-
-系统拍任务快照就发生在失焦这一下，而 `onUserLeaveHint` / `onPause` 要晚 **0.5 秒以上** ——
-所以"先判断一下是不是真离开"这个思路整体不成立，换成用 `onUserLeaveHint` 当信号也一样（同样晚 579ms）。
-
-**代价（得接受）**：失焦无条件贴 ⇒ 弹框打开时保护页也会贴一下（盖在弹框后面）。
-关掉弹框时窗口拿回焦点，上面「揭」那一支立刻清掉 —— 不会像最初那样卡住。
-"区分弹框和真离开"在 Activity 这一层**拿不到可靠信号**，所以放弃区分、接受这一下闪动：
-`isFinishing` 判不出来、`activityResumed` 太早、`onUserLeaveHint` 太晚。
-
-> **三条别再走的路**：
+> **四条别再走的路**：
 >
 > 1. **用 `isFinishing` 判断**。弹框不会让 Activity finish，判不出来。网上常见的建议是这个，我们也写过，是错的。
-> 2. **想靠 `activityResumed` / `onUserLeaveHint` 区分"真离开"**。见上面那组时序 —— 两个都晚于快照时机，
->    结果就是"弹框误触发"换成"真离开漏盖"（`677d04c3` → `0403bf76` 就是这么来回翻的，`4304bea9` 才定稿）。
-> 3. **揭的时候改用 `hideLeaveCoverSafely()`**。它碰到「锁屏要显示」会**直接 return，把保护页留着等 LockScreen 发信号**；
+> 2. **想靠 `activityResumed` / `onUserLeaveHint` 区分"真离开"**。两个都晚于快照时机，
+>    结果就是"弹框误触发"换成"真离开漏盖"（`677d04c3` → `0403bf76` 就是这么来回翻的）。
+> 3. **用 `hasWindowFocus()` 看"哪个窗口拿着焦点"**。失焦那一瞬间两个窗口都是 `false`，
+>    焦点还在交接 —— 实测日志在上一节，别再从这条路想。
+> 4. **揭的时候改用 `hideLeaveCoverSafely()`**。它碰到「锁屏要显示」会**直接 return，把保护页留着等 LockScreen 发信号**；
 >    但「拿回焦点」这个时刻 LockScreen 很可能**早就渲染完、信号也发过了**，那就再也没人来揭——反而卡死。
->    所以 `onWindowFocusChanged(true)` 里在「锁屏要显示」时是直接 `hideLeaveCover()`，这一点别改。
+>    所以 `onWindowFocusChanged(true)` 里在「锁屏要显示」时也是直接 `hideLeaveCover()`，这一点别改。
